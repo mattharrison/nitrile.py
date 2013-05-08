@@ -13,6 +13,21 @@ Hello World!
 \end{document}
 <BLANKLINE>
 
+Context Manager style
+
+>>> doc = Document()
+>>> doc += Comment('hello.tex - Our first LaTex example!')
+>>> doc += Command('documentclass', 'article')
+>>> with doc.Environment('document') as env:
+...      env.write('Hello World!')
+>>> print doc
+% hello.tex - Our first LaTex example!
+\documentclass{article}
+\begin{document}
+Hello World!
+\end{document}
+<BLANKLINE>
+
 >>> with open('/tmp/foo.tex', 'w') as fout:
 ...     doc.write(fout)
 
@@ -56,6 +71,20 @@ School of Computing\\
 \addcontentsline{toc}{subsection}{Preface}
 <BLANKLINE>
 
+>>> c8 = Command('color', 'blue')
+>>> content = Content()
+>>> content +=c8 + T('Name') + LineBreak() + T('Work')
+>>> c9 = Command('author', content)
+>>> print c9
+\author{\color{blue}
+Name\\
+Work}
+<BLANKLINE>
+
+>>> c10 = Command('today')
+>>> print c10
+\today
+<BLANKLINE>
 """
 RESERVED = """# $ % ^ & _ { } \ ~""".split()
 
@@ -64,16 +93,55 @@ class _Node(object):
         self.children = []
         self.parent = None
 
+    def next_sibling(self, sib):
+        # get sibling to right of sib
+        idx = self.children.index(sib)
+        try:
+            return self.children[idx + 1]
+        except IndexError:
+            return None
+
+    def __call__(self, *args):
+        if self.name is None:
+            self.name = args[0]
+            return self
+
+    def __getattr__(self, name):
+        if name == 'Environment':
+            env = Environment(None)
+            self += env
+            return env
+        elif name == 'Command':
+            cmd = Command(None)
+            self += cmd
+            return cmd
+        raise KeyError
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
     def __iter__(self):
         return iter(self.children)
 
     def __iadd__(self, other):
+        if isinstance(other, basestring):
+            other = T(other)
         self.children.append(other)
+        other.parent = self
         return self
 
     def __add__(self, other):
+        if isinstance(other, basestring):
+            other = T(other)
         self.children.append(other)
+        other.parent = self
         return self
+
+    def write(self, txt):
+        self += Text(txt)
 
     def start(self):
         return ''
@@ -124,22 +192,30 @@ class Group(_Node):
 
 
 class Environment(_Node):
-    def __init__(self, name=None):
+    def __init__(self, *args):
         super(Environment, self).__init__()
-        self.name = name
+        self.name = args[0] if args else None
+        self.rest = args[1:]
 
     def start(self):
-        return u'\\begin{{{0}}}\n'.format(self.name)
+        return u'\\begin{{{0}}}{1}\n'.format(
+            self.name,
+            ''.join('{{{0}}}'.format(x) for x in self.rest)
+            )
+
+        return
     def end(self):
         return u'\n\\end{{{0}}}\n'.format(self.name)
 
 
 class Command(_Node):
-    def __init__(self, name, arguments, options=None):
+    def __init__(self, name, arguments=None, options=None,
+                 add_newline=False):
         super(Command, self).__init__()
         self.name = name
         self.list_type = False
         self.str_type = False
+
         if isinstance(arguments, basestring):
             self.str_type = True
             self.arguments = [arguments]
@@ -149,9 +225,10 @@ class Command(_Node):
             self.list_type = True
             self.arguments = arguments
         else:
-            raise TypeError
+            self.arguments = arguments
         # self.arguments = [arguments] if isinstance(arguments, basestring) else arguments
         self.options = [options] if isinstance(options, basestring) else options
+        self.add_newline = add_newline
 
     def start(self):
         if self.options:
@@ -167,11 +244,18 @@ class Command(_Node):
                 two = '{{{0}}}'.format(self.arguments)
         else:
             two = ''
-        return u'\{0}{1}{2}\n'.format(
+        return u'\{0}{1}{2}{3}{4}'.format(
             self.name,
             one,
-            two
+            two,
+            '{}' if self.insert_space() else '',
+            '\n' if self.add_newline else ""
            )
+
+    def insert_space(self):
+        if self.parent:
+            sib = self.parent.next_sibling(self)
+            return sib and isinstance(sib, T)
 
 
 class Switch(_Node):
@@ -184,6 +268,21 @@ class Switch(_Node):
             self.name,
             self.content()
            )
+
+
+class DQuote(_Node):
+    def __init__(self, txt):
+        super(DQuote, self).__init__()
+        self.txt = txt
+
+    def content(self):
+        return self.txt
+
+    def start(self):
+        return u'``'
+
+    def end(self):
+        return u"''"
 
 
 class Comment(_Node):
@@ -225,3 +324,4 @@ class Document(_Node):
 if __name__ == '__main__':
     import doctest
     doctest.testmod()
+    doctest.testfile('test/text_formatting.rst')
