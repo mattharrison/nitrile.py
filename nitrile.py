@@ -6,12 +6,31 @@ r"""
 >>> env += Text('Hello World!')
 >>> doc += env
 >>> print doc
+<BLANKLINE>
 % hello.tex - Our first LaTex example!
-\documentclass{article}
+\documentclass{article}\begin{document}
+Hello World!
+\end{document}
+<BLANKLINE>
+
+# write to preamble after the body
+
+>>> doc = Document()
+>>> doc += Comment('hello.tex - Our first LaTex example!')
+>>> env = Environment('document')
+>>> env += Text('Hello World!')
+>>> doc += env
+>>> preamble = Command('documentclass', 'article')
+>>> preamble += Command('frontmatter')
+>>> doc.preamble = preamble
+>>> print doc
+\documentclass{article}\frontmatter
+% hello.tex - Our first LaTex example!
 \begin{document}
 Hello World!
 \end{document}
 <BLANKLINE>
+
 
 Context Manager style
 
@@ -22,8 +41,7 @@ Context Manager style
 ...      env.write('Hello World!')
 >>> print doc
 % hello.tex - Our first LaTex example!
-\documentclass{article}
-\begin{document}
+\documentclass{article}\begin{document}
 Hello World!
 \end{document}
 <BLANKLINE>
@@ -34,22 +52,22 @@ Hello World!
 >>> c2 = Command('documentclass', 'article', ['11pt', 'twoside', 'a4paper'])
 >>> print c2
 \documentclass[11pt,twoside,a4paper]{article}
-<BLANKLINE>
+
 
 >>> c3 = Command('usepackage', 'color')
 >>> print c3
 \usepackage{color}
-<BLANKLINE>
+
 
 >>> c4 = Command('usepackage', 'p1,p2,p3')
 >>> print c4
 \usepackage{p1,p2,p3}
-<BLANKLINE>
+
 
 >>> c5 = Command('usepackage', 'geometry', 'margin=2cm')
 >>> print c5
 \usepackage[margin=2cm]{geometry}
-<BLANKLINE>
+
 
 >>> foo = Content()
 >>> foo += T('Andrew Roberts')
@@ -61,32 +79,45 @@ Hello World!
 >>> print c6
 \author{Andrew Roberts\\
 School of Computing\\
-\texttt{andy@foo.com}
-}
-<BLANKLINE>
+\texttt{andy@foo.com}}
+
 
 >>> c7 = Command('addcontentsline', 'toc,subsection,Preface'.split(','))
 
 >>> print c7
 \addcontentsline{toc}{subsection}{Preface}
-<BLANKLINE>
+
 
 >>> c8 = Command('color', 'blue')
 >>> content = Content()
 >>> content +=c8 + T('Name') + LineBreak() + T('Work')
 >>> c9 = Command('author', content)
 >>> print c9
-\author{\color{blue}
-Name\\
+\author{\color{blue}Name\\
 Work}
-<BLANKLINE>
+
 
 >>> c10 = Command('today')
 >>> print c10
 \today
-<BLANKLINE>
+
 """
 RESERVED = """# $ % ^ & _ { } \ ~""".split()
+
+ESCAPE_MAPPING = {
+    '~': '\\textasciitilde',
+    '^' : '\\textasciicircum',
+    # handle \ intelligently
+    }
+for char in "& % $ # _ { }".split():
+    ESCAPE_MAPPING[char] = '\\' + char
+
+def escape(txt):
+    txt = txt.replace('\\', '\\textbackslash|||')
+    for old, new in ESCAPE_MAPPING.items():
+        txt = txt.replace(old, new)
+    txt = txt.replace('\\textbackslash|||', '\\textbackslash ')
+    return txt
 
 class _Node(object):
     def __init__(self):
@@ -126,6 +157,11 @@ class _Node(object):
     def __iter__(self):
         return iter(self.children)
 
+    def __isub__(self, txt):
+        if unicode(self.children[-1]).endswith(txt):
+            self.children[-1] = unicode(self.children[-1])[:-len(txt)]
+        return self
+
     def __iadd__(self, other):
         if isinstance(other, basestring):
             other = T(other)
@@ -150,7 +186,7 @@ class _Node(object):
         return ''
 
     def content(self):
-        return ''.join(str(c) for c in self.children)
+        return ''.join(unicode(c) for c in self.children)
 
     def __str__(self):
         return ''.join([self.start(), self.content(), self.end()])
@@ -207,6 +243,15 @@ class Environment(_Node):
     def end(self):
         return u'\n\\end{{{0}}}\n'.format(self.name)
 
+class Raw(_Node):
+    def __init__(self, txt, escape=False):
+        self.txt = txt
+        self.escape=escape
+    def content(self):
+        if self.escape:
+            return escape(self.txt)
+        else:
+            return self.txt
 
 class Command(_Node):
     def __init__(self, name, arguments=None, options=None,
@@ -314,14 +359,47 @@ class Text(_Node):
            )
 
 
-class Document(_Node):
+class Document(object):
+    def __init__(self):
+        self.preamble = _Node()
+        self.document = _Node()
+        self.images = {}  # path to abspath
+
+    def add_image(self, path, abspath):
+        self.images[path] = abspath
+
+    def __iadd__(self, other):
+        #return self.document.__iadd__(other)
+        self.document.__iadd__(other)
+        return self
+
+    def __isub__(self, other):
+        #return self.document.__iadd__(other)
+        self.document.__isub__(other)
+        return self
+
+
     def __str__(self):
-        return u''.join(str(c) for c in self.children)
+        # return u''.join(unicode(c) for c in self.preamble.children +\
+        #                                      self.document.children)
+        return u'\n'.join(unicode(x) for x in [self.preamble, self.document])
+
+    def write(self, fout):
+        fout.write(unicode(self.preamble))
+        fout.write(unicode(self.document))
+
+
+class DocumentOLD(_Node):
+    def __str__(self):
+        return u'\n'.join(unicode(c) for c in self.children)
 
     def write(self, fout):
         fout.write(str(self))
 
+
+
 if __name__ == '__main__':
     import doctest
     doctest.testmod()
-    doctest.testfile('test/text_formatting.rst')
+    #doctest.testfile('test/text_formatting.rst')
+    #doctest.testfile('test/memoir.rst')
