@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 r"""
 >>> doc = Document()
 >>> doc += Comment('hello.tex - Our first LaTex example!')
@@ -105,7 +106,7 @@ Work}
 RESERVED = """# $ % ^ & _ { } \ ~""".split()
 
 ESCAPE_MAPPING = {
-    '~': '\\textasciitilde',
+    '~': '\\textasciitilde ',
     '^' : '\\textasciicircum',
     # handle \ intelligently
     }
@@ -396,6 +397,12 @@ class DocumentOLD(_Node):
     def write(self, fout):
         fout.write(str(self))
 
+def accent_escape(txt):
+    return txt
+    mapping = { u'é':"{\\'e}"}
+    for k, v in mapping.items():
+        txt = txt.replace(k, v)
+    return txt
 
 
 if __name__ == '__main__':
